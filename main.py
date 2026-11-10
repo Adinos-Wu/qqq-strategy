@@ -3,7 +3,6 @@ import yfinance as yf
 import pandas as pd
 import requests
 import os
-from datetime import datetime
 
 # ================= 配置区 =================
 
@@ -29,7 +28,7 @@ def run_strategy():
         )
 
         if qqq.empty:
-            return "行情获取失败：QQQ数据为空。"
+            return "❌ 行情获取失败：QQQ数据为空。"
 
         # 兼容新版yfinance多层列名
         if isinstance(qqq.columns, pd.MultiIndex):
@@ -38,7 +37,7 @@ def run_strategy():
         qqq = qqq.dropna(subset=["Close"])
 
         if len(qqq) < 202:
-            return "行情数据不足，无法可靠计算SMA200。"
+            return "❌ 行情数据不足，无法可靠计算SMA200。"
 
         # 2. 计算均线
         qqq["SMA120"] = qqq["Close"].rolling(120).mean()
@@ -47,7 +46,7 @@ def run_strategy():
         qqq = qqq.dropna(subset=["SMA120", "SMA200"])
 
         if len(qqq) < 2:
-            return "有效均线数据不足。"
+            return "❌ 有效均线数据不足。"
 
         # 3. 提取最近两个交易日
         t = qqq.iloc[-1]
@@ -91,64 +90,62 @@ def run_strategy():
         # 6. 生成交易信号
         signals = []
 
-        # 优先级一：跌破200日线，退出所有杠杆仓位
         if drop_200_2d:
             signals.append(
-                "【避险信号】\n"
-                "QQQ连续2个交易日收盘价低于SMA200。\n"
-                "操作：卖出QLD/TQQQ，切换至SGOV。"
+                "🚨【避险信号｜最高优先级】\n"
+                "QQQ连续2个交易日收盘价低于SMA200。\n\n"
+                "📌 操作建议：\n"
+                "卖出QLD/TQQQ，切换至SGOV。\n"
+                "🛡️ 退出杠杆仓位，进入防守。"
             )
 
-        # 优先级二：站上200日线，但尚未满足进攻条件
         elif above_200_2d:
 
             if golden_cross and above_120_2d:
                 signals.append(
-                    "【进攻信号】\n"
-                    "QQQ连续2日站上SMA120，且SMA120高于SMA200。\n"
-                    "操作：切换至TQQQ（3倍杠杆）。"
+                    "🚀【进攻信号｜趋势确认】\n"
+                    "QQQ连续2日站上SMA120，且SMA120高于SMA200。\n\n"
+                    "📌 操作建议：\n"
+                    "若此前持有QLD，可切换至TQQQ（3倍杠杆）。\n"
+                    "🔥 进入主升趋势进攻阶段。"
                 )
 
             elif not golden_cross:
                 signals.append(
-                    "【反弹参与信号】\n"
-                    "QQQ连续2日站上SMA200，但SMA120仍低于或等于SMA200。\n"
-                    "操作：切换至QLD（2倍杠杆）。"
+                    "📈【反弹参与信号】\n"
+                    "QQQ连续2日站上SMA200，但SMA120仍低于或等于SMA200。\n\n"
+                    "📌 操作建议：\n"
+                    "若此前持有SGOV，可切换至QLD（2倍杠杆）。\n"
+                    "⚖️ 参与反弹，但暂不使用3倍杠杆。"
                 )
 
             else:
                 signals.append(
-                    "【趋势确认等待】\n"
-                    "SMA120高于SMA200，但QQQ尚未连续2日站上SMA120。\n"
-                    "操作：暂不升级至TQQQ，等待确认。"
+                    "⏳【趋势确认等待】\n"
+                    "QQQ连续2日站上SMA200，且SMA120高于SMA200，"
+                    "但尚未连续2日站上SMA120。\n\n"
+                    "📌 操作建议：\n"
+                    "暂不升级至TQQQ，等待价格确认。"
                 )
 
-        # 优先级三：跌破120日线，但尚未跌破200日线
         elif drop_120_2d:
             signals.append(
-                "【降级信号】\n"
+                "⚠️【降级信号｜趋势转弱】\n"
                 "QQQ连续2个交易日收盘价低于SMA120，"
-                "但尚未连续2日跌破SMA200。\n"
-                "操作：卖出TQQQ，切换至QLD。"
+                "但尚未连续2日跌破SMA200。\n\n"
+                "📌 操作建议：\n"
+                "若此前持有TQQQ，卖出并切换至QLD（2倍杠杆）。\n"
+                "🛡️ 降低杠杆，等待趋势修复。"
             )
 
-        # 优先级四：重新站上120日线
         elif above_120_2d and golden_cross:
             signals.append(
-                "【重新进攻信号】\n"
-                "QQQ连续2日站上SMA120，且SMA120高于SMA200。\n"
-                "操作：若此前持有QLD，可切换至TQQQ。"
+                "🔄【重新进攻信号】\n"
+                "QQQ连续2日站上SMA120，且SMA120高于SMA200。\n\n"
+                "📌 操作建议：\n"
+                "若此前持有QLD，可切换至TQQQ（3倍杠杆）。"
             )
 
-        # 7. 生成播报
-        msg = (
-            f"【QQQ每日交易信号】\n"
-            f"数据日期：{trade_date}\n"
-            f"收盘价：{close_t:.2f}\n"
-            f"SMA120：{sma120_t:.2f}\n"
-            f"SMA200：{sma200_t:.2f}\n"
-            f"均线关系：{'SMA120 > SMA200' if golden_cross else 'SMA120 ≤ SMA200'}\n\n"
-       
         # 7. 生成每日投资简报
 
         # 均线趋势描述
@@ -167,11 +164,11 @@ def run_strategy():
         elif close_t > sma200_t:
             price_position = "🟡 位于200日线上方、120日线下方"
         elif close_t < sma200_t:
-            price_position = "🔴 跌破200日均线"
+            price_position = "🔴 位于200日线下方"
         else:
             price_position = "⚪ 均线附近震荡"
 
-        # 信号内容
+        # 8. 拼接播报消息
         msg = (
             "━━━━━━━━━━━━━━━━━━\n"
             "📊 QQQ 每日趋势跟踪简报\n"
@@ -195,9 +192,10 @@ def run_strategy():
             msg += "\n\n".join(signals)
         else:
             msg += (
-                "⏳ 【今日无交易信号】\n\n"
-                "当前行情尚未满足新的连续2日确认条件。\n"
-                "📌 建议：保持原有策略，不因单日波动贸然调整仓位。"
+                "⏳【今日无交易信号】\n\n"
+                "当前行情尚未满足新的连续2日确认条件。\n\n"
+                "📌 操作建议：\n"
+                "保持原有策略，不因单日波动贸然调整仓位。"
             )
 
         msg += (
@@ -210,16 +208,15 @@ def run_strategy():
             "🤖 QQQ Trend Following System"
         )
 
-
         return msg
 
     except Exception as e:
-        return f"策略运行失败：{type(e).__name__}: {e}"
+        return f"❌ 策略运行失败：{type(e).__name__}: {e}"
 
 
 def send_pushplus(title, content):
     if not PUSHPLUS_TOKEN:
-        print("未设置PUSHPLUS_TOKEN，跳过推送。")
+        print("⚠️ 未设置PUSHPLUS_TOKEN，跳过推送。")
         return
 
     url = "https://www.pushplus.plus/send"
@@ -238,10 +235,10 @@ def send_pushplus(title, content):
             timeout=PUSH_TIMEOUT
         )
         response.raise_for_status()
-        print("PushPlus响应：", response.text)
+        print("📨 PushPlus响应：", response.text)
 
     except requests.RequestException as e:
-        print("PushPlus推送失败：", repr(e))
+        print("❌ PushPlus推送失败：", repr(e))
 
 
 if __name__ == "__main__":
@@ -250,4 +247,4 @@ if __name__ == "__main__":
     print(result)
 
     if PUSH_NO_SIGNAL or "今日无交易信号" not in result:
-        send_pushplus("QQQ每日交易信号", result)
+        send_pushplus("📊 QQQ每日趋势跟踪简报", result)
