@@ -148,16 +148,68 @@ def run_strategy():
             f"SMA120：{sma120_t:.2f}\n"
             f"SMA200：{sma200_t:.2f}\n"
             f"均线关系：{'SMA120 > SMA200' if golden_cross else 'SMA120 ≤ SMA200'}\n\n"
+       
+        # 7. 生成每日投资简报
+
+        # 均线趋势描述
+        if golden_cross:
+            trend = "🟢 多头排列"
+        else:
+            trend = "🔴 空头排列"
+
+        # 价格与均线的距离
+        distance_120 = (close_t / sma120_t - 1) * 100
+        distance_200 = (close_t / sma200_t - 1) * 100
+
+        # 价格位置
+        if close_t > sma120_t and close_t > sma200_t:
+            price_position = "🚀 处于双均线上方"
+        elif close_t > sma200_t:
+            price_position = "🟡 位于200日线上方、120日线下方"
+        elif close_t < sma200_t:
+            price_position = "🔴 跌破200日均线"
+        else:
+            price_position = "⚪ 均线附近震荡"
+
+        # 信号内容
+        msg = (
+            "━━━━━━━━━━━━━━━━━━\n"
+            "📊 QQQ 每日趋势跟踪简报\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
+
+            f"📅 交易日期：{trade_date}\n"
+            f"💰 QQQ 收盘价：${close_t:.2f}\n\n"
+
+            "【📈 均线监测】\n"
+            f"🔵 SMA120：${sma120_t:.2f}（价格偏离 {distance_120:+.2f}%）\n"
+            f"🟠 SMA200：${sma200_t:.2f}（价格偏离 {distance_200:+.2f}%）\n"
+            f"📐 均线关系：{trend}\n"
+            f"📍 当前位置：{price_position}\n\n"
+
+            "━━━━━━━━━━━━━━━━━━\n"
+            "🎯 策略信号\n"
+            "━━━━━━━━━━━━━━━━━━\n\n"
         )
 
         if signals:
             msg += "\n\n".join(signals)
         else:
             msg += (
-                "【今日无交易信号】\n"
-                "尚未满足任何新的连续2日确认条件。\n"
-                "请根据实际持仓继续执行原有策略。"
+                "⏳ 【今日无交易信号】\n\n"
+                "当前行情尚未满足新的连续2日确认条件。\n"
+                "📌 建议：保持原有策略，不因单日波动贸然调整仓位。"
             )
+
+        msg += (
+            "\n\n━━━━━━━━━━━━━━━━━━\n"
+            "⚠️ 风险提示\n"
+            "━━━━━━━━━━━━━━━━━━\n"
+            "1️⃣ 本简报基于QQQ收盘数据计算，信号需收盘后确认。\n"
+            "2️⃣ 信号不代表账户实际持仓，请结合当前仓位执行。\n"
+            "3️⃣ 杠杆ETF存在波动损耗，注意控制风险。\n\n"
+            "🤖 QQQ Trend Following System"
+        )
+
 
         return msg
 
