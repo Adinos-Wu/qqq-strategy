@@ -178,20 +178,20 @@ def run_strategy():
         # =========================
 
         msg = (
-            f"📊 QQQ 四状态趋势策略日报\n"
-            f"📅 交易日：{trade_date}\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"📈 行情数据\n"
-            f"QQQ 收盘价：${close:.2f}\n"
-            f"SMA120：${sma120:.2f}（{change_120:+.2f}%）\n"
-            f"SMA200：${sma200:.2f}（{change_200:+.2f}%）\n"
-            f"均线关系：{cross_status}\n"
-            f"价格位置：{position_120}，{position_200}\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"📌 交易信号\n"
-            f"{signal}\n"
-            f"🔄 操作建议：{action}\n"
-        )
+    f"📊 QQQ 行情趋势策略日报\n"
+    f"📅 交易日：{trade_date}\n"
+    f"━━━━━━━━━━━━━━━━━━\n"
+    f"💹 行情数据\n"
+    f"💰 QQQ 收盘价：${close:.2f}\n"
+    f"📈 SMA120：${sma120:.2f}（{change_120:+.2f}%）\n"
+    f"📉 SMA200：${sma200:.2f}（{change_200:+.2f}%）\n"
+    f"🔀 均线关系：{cross_status}\n"
+    f"📍 价格位置：{position_120}，{position_200}\n"
+    f"━━━━━━━━━━━━━━━━━━\n"
+    f"🎯 交易信号\n"
+    f"🚦 当前信号：{signal}\n"
+    f"🔄 操作建议：{action}\n"
+)
 
         return msg, signal
 
