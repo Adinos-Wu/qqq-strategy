@@ -2,9 +2,8 @@ name: QQQ Strategy Auto Check
 
 on:
   schedule:
-    # 每天 UTC 时间 22:00 运行 (美股夏令时收盘后1小时，冬令时收盘后半小时)
     - cron: '0 22 * * 1-5' 
-  workflow_dispatch: # 允许你手动点击按钮测试
+  workflow_dispatch: 
 
 jobs:
   run-strategy:
@@ -25,11 +24,3 @@ jobs:
         env:
           PUSHPLUS_TOKEN: ${{ secrets.PUSHPLUS_TOKEN }}
         run: python main.py
-
-      - name: Commit state changes
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add state.json
-          git diff --quiet && git diff --staged --quiet || git commit -m "Update state [skip ci]"
-          git push
