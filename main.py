@@ -213,7 +213,7 @@ def pushplus_send(content):
 
     data = {
         "token": PUSHPLUS_TOKEN,
-        "title": "QQQ 四状态趋势策略日报",
+        "title": "QQQ 行情趋势策略日报",
         "content": content,
         "template": "txt"
     }
