@@ -3,7 +3,7 @@ name: QQQ Strategy Auto Check
 
 on:
   schedule:
-    - cron: '0 22 * * 1-5'
+    - cron: '17 22 * * 1-5'
 
   workflow_dispatch:
 
