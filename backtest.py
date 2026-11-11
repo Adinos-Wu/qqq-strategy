@@ -23,47 +23,47 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 TICKERS = ["QQQ", "TQQQ", "QLD", "SGOV", "SHV"]
 
 # ============================================================
-# 2. 下载历史行情（修复版）
+# 2. 下载历史行情（彻底重写，防弹版）
 # ============================================================
-def normalize_index(index):
-    index = pd.to_datetime(index)
-    if index.tz is not None:
-        index = index.tz_localize(None)
-    return index.normalize()
-
-def extract_price_column(df, field):
-    if isinstance(df.columns, pd.MultiIndex):
-        for level in range(df.columns.nlevels):
-            values = df.columns.get_level_values(level)
-            if field in values:
-                result = df.xs(field, axis=1, level=level)
-                if isinstance(result, pd.DataFrame):
-                    return result.iloc[:, 0]
-                return result
-        raise ValueError(f"无法找到行情字段：{field}")
-    if field not in df.columns:
-        raise ValueError(f"无法找到行情字段：{field}")
-    return df[field]
-
-def download_one(ticker):
-    print(f"正在下载 {ticker} ...")
-    df = yf.download(ticker, start=DATA_START, auto_adjust=True, progress=False, threads=False)
-    if df.empty:
-        raise RuntimeError(f"{ticker} 行情数据为空")
-    open_price = extract_price_column(df, "Open")
-    close_price = extract_price_column(df, "Close")
-    result = pd.DataFrame({f"{ticker}_Open": open_price, f"{ticker}_Close": close_price})
-    result.index = normalize_index(result.index)
-    result = result[~result.index.duplicated(keep="last")].sort_index()
-    return result
-
 def download_all_data():
-    frames = []
+    print("开始从 Yahoo Finance 下载数据...")
+    data_dict = {}
+    
     for ticker in TICKERS:
-        frames.append(download_one(ticker))
-    # 必须要有这一步 pd.concat 才能把数据拼起来
-    data = pd.concat(frames, axis=1).sort_index()
+        print(f" -> 正在下载 {ticker} 数据...")
+        # 使用最底层的参数，强行拉取单只股票
+        df = yf.download(ticker, start=DATA_START, auto_adjust=True, progress=False)
+        
+        if df.empty:
+            print(f" ⚠️ 警告: {ticker} 下载为空，使用空数据替代。")
+            data_dict[f"{ticker}_Open"] = pd.Series(dtype=float)
+            data_dict[f"{ticker}_Close"] = pd.Series(dtype=float)
+            continue
+            
+        # 处理可能的多级列名（兼容新版 yfinance）
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+            
+        data_dict[f"{ticker}_Open"] = df["Open"]
+        data_dict[f"{ticker}_Close"] = df["Close"]
+        
+        print(f" ✅ {ticker} 下载完成，共 {len(df)} 条记录。")
+
+    print("正在合并所有数据...")
+    data = pd.DataFrame(data_dict)
+    
+    # 统一时区并去除重影
+    data.index = pd.to_datetime(data.index).tz_localize(None).normalize()
+    data = data[~data.index.duplicated(keep="last")].sort_index()
+    
+    # 剔除 QQQ 缺失数据的日期
     data = data.dropna(subset=["QQQ_Open", "QQQ_Close"])
+    print(f"数据合并完成，最终有效交易日：{len(data)} 天。\n")
+    
+    # 立刻保存原始行情，防止后面代码报错你看不到
+    data.to_csv(OUTPUT_DIR / "1_历史行情原始数据.csv", encoding="utf-8-sig")
+    print(f"✅ 原始行情数据已保存至: {OUTPUT_DIR / '1_历史行情原始数据.csv'}")
+    
     return data
 
 # ============================================================
@@ -79,12 +79,12 @@ def calculate_indicators(data):
     df["above200_2d"] = above_200 & above_200.shift(1).fillna(False).astype(bool)
     df["below200_2d"] = below_200 & below_200.shift(1).fillna(False).astype(bool)
     
-    # 斜率：今天大于昨天
+    # 斜率：今天的均线值 > 昨天的均线值
     df["SMA200_Slope_Up"] = df["SMA200"] > df["SMA200"].shift(1)
     return df
 
 # ============================================================
-# 4. 严格按四大状态生成信号
+# 4. 四大状态生成信号
 # ============================================================
 def generate_pure_slope_signals(df):
     signals = []
@@ -95,20 +95,17 @@ def generate_pure_slope_signals(df):
             signals.append(current_position)
             continue
 
-        # 状态一：连续2日跌破200日线 -> 彻底避险 SGOV
+        # 状态一：跌破
         if row["below200_2d"]:
             current_position = "DEFENSIVE"
         
-        # 状态二/三：连续2日站上200日线
+        # 状态二 / 状态三：站上
         elif row["above200_2d"]:
             if row["SMA200_Slope_Up"]:
-                # 斜率向上 -> 状态三：主升满仓 TQQQ
                 current_position = "TQQQ"
             else:
-                # 斜率向下 -> 状态二：弱势反弹，买 QLD 试错
                 current_position = "QLD"
-        
-        # 其他情况：维持原状态
+                
         signals.append(current_position)
 
     return pd.Series(signals, index=df.index, name="Pure_Slope")
@@ -170,7 +167,7 @@ def calculate_strategy_returns(position, asset_returns):
     return result
 
 # ============================================================
-# 6. 绩效指标
+# 6. 绩效指标与主循环
 # ============================================================
 def calculate_metrics(returns, position, start, end):
     next_dates = pd.Series(returns.index, index=returns.index).shift(-1)
@@ -204,11 +201,7 @@ def calculate_metrics(returns, position, start, end):
         "实际回测结束日": actual_end_date.strftime("%Y-%m-%d")
     }
 
-# ============================================================
-# 7. 主回测循环
-# ============================================================
-def run_backtest():
-    data = download_all_data()
+def run_backtest(data):
     df = calculate_indicators(data)
     
     signals = {
@@ -236,12 +229,20 @@ def run_backtest():
 
     return pd.DataFrame(results), positions
 
+# ============================================================
+# 7. 主程序
+# ============================================================
 if __name__ == "__main__":
     print("=" * 60)
-    print("纯斜率四状态策略 回测（修复版）")
+    print("纯斜率四状态策略 回测（彻底修复下载版）")
     print("=" * 60)
 
-    results_df, positions = run_backtest()
+    # 第一步：下载数据（会打印进度）
+    raw_data = download_all_data()
+
+    # 第二步：执行回测
+    print("开始执行策略回测计算...")
+    results_df, positions = run_backtest(raw_data)
 
     print("\n回测绩效对比：")
     print(results_df.to_string(
@@ -254,9 +255,12 @@ if __name__ == "__main__":
         }
     ))
     
-    results_df.to_csv(OUTPUT_DIR / "纯斜率策略_回测结果.csv", index=False, encoding="utf-8-sig")
+    # 第三步：保存所有结果
+    results_df.to_csv(OUTPUT_DIR / "2_纯斜率策略_回测结果.csv", index=False, encoding="utf-8-sig")
 
     executed = positions["纯斜率策略"].shift(1).dropna()
     changes = executed[executed.ne(executed.shift(1))]
-    changes.to_csv(OUTPUT_DIR / "纯斜率策略_交易记录.csv", encoding="utf-8-sig")
-    print(f"\n结果已保存至：{OUTPUT_DIR.resolve()}")
+    changes.to_csv(OUTPUT_DIR / "3_纯斜率策略_交易记录.csv", encoding="utf-8-sig")
+    
+    print(f"\n✅ 所有结果均已保存至文件夹：{OUTPUT_DIR.resolve()}")
+    print("文件夹内应包含：原始数据、回测绩效、交易记录。")
