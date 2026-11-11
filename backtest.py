@@ -23,7 +23,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 TICKERS = ["QQQ", "TQQQ", "QLD", "SGOV", "SHV"]
 
 # ============================================================
-# 2. 下载历史行情
+# 2. 下载历史行情（修复版）
 # ============================================================
 def normalize_index(index):
     index = pd.to_datetime(index)
@@ -58,30 +58,33 @@ def download_one(ticker):
     return result
 
 def download_all_data():
-    frames = [download_one(ticker) for ticker in TICKERS]
+    frames = []
+    for ticker in TICKERS:
+        frames.append(download_one(ticker))
+    # 必须要有这一步 pd.concat 才能把数据拼起来
     data = pd.concat(frames, axis=1).sort_index()
     data = data.dropna(subset=["QQQ_Open", "QQQ_Close"])
     return data
 
 # ============================================================
-# 3. 计算指标（仅用 SMA200 及斜率）
+# 3. 计算指标
 # ============================================================
 def calculate_indicators(data):
     df = data.copy()
     df["SMA200"] = df["QQQ_Close"].rolling(SMA_LONG, min_periods=SMA_LONG).mean()
     
-    # 连续2日站上/跌破
     above_200 = df["QQQ_Close"] > df["SMA200"]
     below_200 = df["QQQ_Close"] < df["SMA200"]
+    
     df["above200_2d"] = above_200 & above_200.shift(1).fillna(False).astype(bool)
     df["below200_2d"] = below_200 & below_200.shift(1).fillna(False).astype(bool)
     
-    # SMA200 斜率（今天大于昨天为向上）
+    # 斜率：今天大于昨天
     df["SMA200_Slope_Up"] = df["SMA200"] > df["SMA200"].shift(1)
     return df
 
 # ============================================================
-# 4. 严格按你的四大状态生成信号
+# 4. 严格按四大状态生成信号
 # ============================================================
 def generate_pure_slope_signals(df):
     signals = []
@@ -92,27 +95,24 @@ def generate_pure_slope_signals(df):
             signals.append(current_position)
             continue
 
-        # 【状态一】连续2日跌破 200 日线 -> 彻底避险
+        # 状态一：连续2日跌破200日线 -> 彻底避险 SGOV
         if row["below200_2d"]:
             current_position = "DEFENSIVE"
         
-        # 【状态二 & 状态三】连续2日站上 200 日线
+        # 状态二/三：连续2日站上200日线
         elif row["above200_2d"]:
-            # 如果均线斜率向上 -> 【状态三】主升趋势，满仓 TQQQ
             if row["SMA200_Slope_Up"]:
+                # 斜率向上 -> 状态三：主升满仓 TQQQ
                 current_position = "TQQQ"
-            # 如果均线斜率向下 -> 【状态二】弱势反弹，持有 QLD
             else:
+                # 斜率向下 -> 状态二：弱势反弹，买 QLD 试错
                 current_position = "QLD"
         
-        # 其他情况（价格在均线附近震荡，未满足连续2日条件）维持原仓位
+        # 其他情况：维持原状态
         signals.append(current_position)
 
     return pd.Series(signals, index=df.index, name="Pure_Slope")
 
-# ============================================================
-# 5. 对照组策略
-# ============================================================
 def generate_tqqq_sma200_signals(df):
     signals = []
     current_position = "DEFENSIVE"
@@ -128,7 +128,7 @@ def generate_tqqq_sma200_signals(df):
     return pd.Series(signals, index=df.index, name="TQQQ_SMA200")
 
 # ============================================================
-# 6. 资产解析与收益计算
+# 5. 资产解析与收益
 # ============================================================
 def get_defensive_ticker(date, data):
     if pd.notna(data.at[date, "SGOV_Open"]):
@@ -161,7 +161,6 @@ def calculate_asset_returns(data):
     return returns
 
 def calculate_strategy_returns(position, asset_returns):
-    # T日收盘出信号，T+1日开盘执行
     executed_position = position.shift(1)
     result = pd.Series(index=position.index, dtype=float)
     for date in position.index:
@@ -171,7 +170,7 @@ def calculate_strategy_returns(position, asset_returns):
     return result
 
 # ============================================================
-# 7. 绩效指标与回测主循环
+# 6. 绩效指标
 # ============================================================
 def calculate_metrics(returns, position, start, end):
     next_dates = pd.Series(returns.index, index=returns.index).shift(-1)
@@ -205,20 +204,19 @@ def calculate_metrics(returns, position, start, end):
         "实际回测结束日": actual_end_date.strftime("%Y-%m-%d")
     }
 
+# ============================================================
+# 7. 主回测循环
+# ============================================================
 def run_backtest():
     data = download_all_data()
     df = calculate_indicators(data)
     
-    # 生成信号
     signals = {
         "纯斜率策略": generate_pure_slope_signals(df),
         "TQQQ_SMA200": generate_tqqq_sma200_signals(df)
     }
     
-    # 持仓解析
     positions = {name: resolve_positions(sig, data) for name, sig in signals.items()}
-    
-    # 收益计算
     asset_returns = calculate_asset_returns(data)
     strategy_returns = {name: calculate_strategy_returns(positions[name], asset_returns) for name in positions}
 
@@ -236,17 +234,14 @@ def run_backtest():
             if metrics:
                 results.append({"回测区间": window_name, "策略": strategy_name, **metrics})
 
-    return pd.DataFrame(results), positions, strategy_returns
+    return pd.DataFrame(results), positions
 
-# ============================================================
-# 8. 主程序
-# ============================================================
 if __name__ == "__main__":
     print("=" * 60)
-    print("纯斜率四状态策略 回测")
+    print("纯斜率四状态策略 回测（修复版）")
     print("=" * 60)
 
-    results_df, positions, _ = run_backtest()
+    results_df, positions = run_backtest()
 
     print("\n回测绩效对比：")
     print(results_df.to_string(
@@ -261,7 +256,6 @@ if __name__ == "__main__":
     
     results_df.to_csv(OUTPUT_DIR / "纯斜率策略_回测结果.csv", index=False, encoding="utf-8-sig")
 
-    # 导出交易记录
     executed = positions["纯斜率策略"].shift(1).dropna()
     changes = executed[executed.ne(executed.shift(1))]
     changes.to_csv(OUTPUT_DIR / "纯斜率策略_交易记录.csv", encoding="utf-8-sig")
