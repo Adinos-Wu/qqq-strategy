@@ -24,10 +24,10 @@ PUSH_TIMEOUT = 15
 # 上次成功推送的交易日期
 STATE_FILE = Path(__file__).parent / "last_trade_date.txt"
 
-# 上次成功推送后的策略目标持仓
+# 当前策略持仓记录
 POSITION_FILE = Path(__file__).parent / "strategy_position.txt"
 
-# 策略参数
+# SMA200 参数
 SMA_LONG = 200
 
 # 美东收盘后预留15分钟，等待行情数据更新
@@ -70,7 +70,7 @@ def save_last_trade_date(trade_date):
 
 
 # ============================================================
-# 4. 读取策略目标持仓
+# 4. 读取当前策略持仓
 # ============================================================
 
 def get_current_position():
@@ -95,14 +95,14 @@ def get_current_position():
 
 
 # ============================================================
-# 5. 保存策略目标持仓
+# 5. 保存当前策略持仓
 # ============================================================
 
 def save_current_position(position):
 
     if position not in ("TQQQ", "SGOV"):
         raise ValueError(
-            f"无效的策略目标持仓：{position}"
+            f"无效的策略持仓：{position}"
         )
 
     POSITION_FILE.write_text(
@@ -110,7 +110,7 @@ def save_current_position(position):
         encoding="utf-8"
     )
 
-    print(f"策略目标持仓已更新：{position}")
+    print(f"策略持仓记录已更新：{position}")
 
 
 # ============================================================
@@ -176,7 +176,7 @@ def run_strategy():
                 pd.Index(qqq.index.date) < today_et
             ]
 
-        if len(qqq) < SMA_LONG:
+        if len(qqq) < SMA_LONG + 1:
             return "❌ 有效行情数据不足，无法计算 SMA200。"
 
         # ----------------------------------------------------
@@ -214,7 +214,7 @@ def run_strategy():
             return "❌ 收盘价异常，无法计算涨跌幅。"
 
         # ----------------------------------------------------
-        # 今日行情信息
+        # 今日行情数据
         # ----------------------------------------------------
 
         daily_change_price = close - close_1
@@ -257,13 +257,13 @@ def run_strategy():
         )
 
         # ----------------------------------------------------
-        # 读取当前策略目标持仓
+        # 读取当前策略持仓
         # ----------------------------------------------------
 
         current_position = get_current_position()
 
         # ----------------------------------------------------
-        # 生成交易信号
+        # 生成交易信号和操作建议
         # ----------------------------------------------------
 
         target_position = current_position
@@ -272,39 +272,45 @@ def run_strategy():
 
             target_position = "TQQQ"
 
-            if current_position != "TQQQ":
-
-                signal = "🟢 两日确认：进攻信号"
-
-                action = (
-                    "买入 TQQQ，卖出原有持仓；"
-                    "下一交易日开盘执行"
-                )
-
-            else:
+            if current_position == "TQQQ":
 
                 signal = "🟢 多头趋势延续"
 
                 action = "继续持有 TQQQ，不需要换仓"
 
+            elif current_position == "SGOV":
+
+                signal = "🟢 两日确认：进攻信号"
+
+                action = "卖出 SGOV，买入 TQQQ"
+
+            else:
+
+                signal = "🟢 两日确认：进攻信号"
+
+                action = "买入 TQQQ"
+
         elif below_200_2d:
 
             target_position = "SGOV"
 
-            if current_position != "SGOV":
-
-                signal = "🔴 两日确认：避险信号"
-
-                action = (
-                    "买入 SGOV，卖出原有持仓；"
-                    "下一交易日开盘执行"
-                )
-
-            else:
+            if current_position == "SGOV":
 
                 signal = "🔴 防御趋势延续"
 
                 action = "继续持有 SGOV，不需要换仓"
+
+            elif current_position == "TQQQ":
+
+                signal = "🔴 两日确认：避险信号"
+
+                action = "卖出 TQQQ，买入 SGOV"
+
+            else:
+
+                signal = "🔴 两日确认：避险信号"
+
+                action = "买入 SGOV"
 
         else:
 
@@ -313,48 +319,32 @@ def run_strategy():
             if current_position:
 
                 action = (
-                    f"维持原策略目标持仓 {current_position}，"
+                    f"继续持有 {current_position}，"
                     "暂不调整"
                 )
 
             else:
 
-                action = (
-                    "尚无已确认的策略目标持仓，"
-                    "等待连续两日确认"
-                )
+                action = "等待连续两日确认，暂不买入"
 
         # ----------------------------------------------------
         # 判断价格位置
         # ----------------------------------------------------
 
         if above_today:
+
             position_status = "SMA200上方"
 
         elif below_today:
+
             position_status = "SMA200下方"
 
         else:
+
             position_status = "等于SMA200"
 
-        # 两日确认状态
-        if above_200_2d:
-            confirmation_status = "连续2日站上SMA200"
-
-        elif below_200_2d:
-            confirmation_status = "连续2日跌破SMA200"
-
-        elif above_today:
-            confirmation_status = "今日站上，尚未完成两日确认"
-
-        elif below_today:
-            confirmation_status = "今日跌破，尚未完成两日确认"
-
-        else:
-            confirmation_status = "今日收盘价等于SMA200"
-
         # ----------------------------------------------------
-        # 推送内容
+        # 当前持仓显示
         # ----------------------------------------------------
 
         current_position_text = (
@@ -363,14 +353,12 @@ def run_strategy():
             else "尚未建立"
         )
 
-        target_position_text = (
-            target_position
-            if target_position
-            else "等待确认"
-        )
+        # ----------------------------------------------------
+        # 推送内容
+        # ----------------------------------------------------
 
         msg = (
-            f"📊 QQQ SMA200 两日确认策略日报\n"
+            f"📊 QQQ SMA200 趋势策略日报\n"
             f"📅 交易日：{trade_date}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"💹 行情数据\n"
@@ -380,19 +368,14 @@ def run_strategy():
             f"（{daily_change:+.2f}%）\n"
             f"📈 SMA200：${sma200:.2f} "
             f"（偏离 {change_200:+.2f}%）\n"
-            f"📍 当前价格位置：{position_status}\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"🔍 两日确认\n"
-            f"昨日收盘：${close_1:.2f}\n"
-            f"昨日 SMA200：${sma200_1:.2f}\n"
-            f"确认状态：{confirmation_status}\n"
+            f"📅 昨日收盘：${close_1:.2f}\n"
+            f"📉 昨日 SMA200：${sma200_1:.2f}\n"
+            f"📍 价格位置：{position_status}\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"🎯 交易信号\n"
             f"🚦 当前信号：{signal}\n"
-            f"📦 原策略目标持仓：{current_position_text}\n"
-            f"📦 新策略目标持仓：{target_position_text}\n"
+            f"📦 当前持仓：{current_position_text}\n"
             f"🔄 操作建议：{action}\n"
-            f"⏰ 执行时间：下一交易日开盘\n"
         )
 
         return (
@@ -422,7 +405,7 @@ def pushplus_send(content):
 
     data = {
         "token": PUSHPLUS_TOKEN,
-        "title": "QQQ SMA200 两日确认策略日报",
+        "title": "QQQ SMA200 趋势策略日报",
         "content": content,
         "template": "txt"
     }
@@ -486,7 +469,7 @@ if __name__ == "__main__":
     if last_trade_date and trade_date <= last_trade_date:
 
         print(
-            f"⏭️ 跳过推送：交易日期 {trade_date} "
+            f"跳过推送：交易日期 {trade_date} "
             f"已经推送过，或早于最近推送日期 {last_trade_date}。"
         )
 
@@ -511,11 +494,11 @@ if __name__ == "__main__":
 
     pushplus_send(msg)
 
-    # 只有推送成功后才更新策略目标持仓
+    # 只有目标持仓有效时才更新持仓记录
     if target_position in ("TQQQ", "SGOV"):
 
         save_current_position(target_position)
 
     save_last_trade_date(trade_date)
 
-    print("✅ 本次策略执行完成。")
+    print("本次策略执行完成。")
